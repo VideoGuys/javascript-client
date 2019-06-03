@@ -21,5 +21,9 @@
   "bugs": {
     "url": "https://github.com/VideoGuys/javascript-client/issues"
   },
-  "homepage": "https://github.com/VideoGuys/javascript-client#readme"
+  "homepage": "https://github.com/VideoGuys/javascript-client#readme",
+  "dependencies": {
+    "request": "^2.88.0",
+    "request-progress": "^3.0.0"
+  }
 }
