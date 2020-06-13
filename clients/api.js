@@ -270,13 +270,13 @@ module.exports = class ApiClient {
       throw new Error('video is deleted');
     }
 
-    const videoQualities = Object.keys(videoStream.qualities);
+    const videoQualities = videoStream.qualities;
     if(!Array.isArray(videoQualities) || videoQualities.length <= 0){
       throw new Error('no video qualities available');
     }
 
     videoQualities.sort((a, b) => {
-      return b.split('p')[0]-a.split('p')[0];
+      return b.size[1] - a.size[1];
     });
 
     const download_url = videoStream.qualities[videoQualities[0]];
