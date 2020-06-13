@@ -279,7 +279,7 @@ module.exports = class ApiClient {
       return b.size[1] - a.size[1];
     });
 
-    const download_url = videoStream.qualities[videoQualities[0]];
+    const download_url = videoQualities[0].src;
   
     return new DownloadClient({
       filepath,
