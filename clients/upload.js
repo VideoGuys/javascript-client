@@ -165,7 +165,7 @@ module.exports = class UploadClient {
     this.progressListeners.forEach(callback => callback(progress));
   }
 
-  emitProgressCompleted() {
+  emitProgressCompleted(response) {
     while(this.progressListeners.length > 0){
       (this.progressListeners.shift())({ status: 'completed', response });
     }
