@@ -19,6 +19,8 @@ module.exports = class ApiClient {
       this.api_host = 'https://vidup.io/api';
     }
 
+    this.uploadingVideos = {};
+
     this.setup();
   }
 
@@ -223,11 +225,15 @@ module.exports = class ApiClient {
   async uploadVideo(options){
     let {
       code,
-      filepath
+      filepath,
+      retries = 1,
+      concurrency = 1
     } = options;
     if(typeof filepath === 'undefined'){
       throw new Error('missing required filepath for new video upload');
     }
+    this.uploadingVideos[filepath] = new UploadClient({ filepath });
+    
     let videoUpload;
     if(code){
       videoUpload = await this.getVideoUpload(code);
@@ -243,12 +249,13 @@ module.exports = class ApiClient {
       videoUpload = videoUpload.upload;
     }
 
-    const uploadClient = new UploadClient({
-      filepath,
-      upload_url: videoUpload.url
-    });
+    this.uploadingVideos[filepath].setUploadUrl(videoUpload.url);
 
-    return uploadClient.start();
+    return this.uploadingVideos[filepath].start({ retries, concurrency });
+  }
+
+  getUploadClient(filepath) {
+    return this.uploadingVideos[filepath];
   }
 
   async downloadVideo(options){

@@ -1,23 +1,29 @@
 const fs = require('fs');
+const async = require('async');
 const request = require('request');
 
 module.exports = class UploadClient {
-  constructor({ upload_url, filepath }){
-    if(typeof upload_url === 'undefined'){
-      throw new Error('upload url required for all requests');
+  constructor({ upload_url, filepath } = {}){
+    if(typeof upload_url !== 'undefined'){
+      this.upload_url = upload_url;
     }
-    this.upload_url = upload_url;
 
     if(typeof filepath !== 'undefined'){
       this.filepath = filepath;
     }
 
-    this.setup();
+    this.progressListeners = [];
+
+    if(this.upload_url) this.setup();
   }
 
-  setup() {
+  setup(upload_url = this.upload_url) {
+    if(typeof upload_url === 'undefined'){
+      throw new Error('upload url required for all requests');
+    }
+
     this.api = request.defaults({
-      baseUrl: this.upload_url,
+      baseUrl: upload_url,
       headers: {
         'User-Agent': 'VideoGuys/0.1.0/javascript'
       },
@@ -36,20 +42,34 @@ module.exports = class UploadClient {
       });
     }
     this.request = requester.bind(this);
+
+    this._isSetup = true;
   }
 
-  complete(){
-    return this.request({
+  async complete(){
+    this.emitProgress({ status: 'completing' });
+    let response = await this.request({
       uri: '/completed',
       method: 'POST'
     });
+    this.emitProgressCompleted(response);
+    return response;
   }
 
   setfilepath(filepath){
     this.filepath = filepath;
   }
 
-  async start(){
+  setUploadUrl(upload_url){
+    this.upload_url = upload_url;
+    this.setup();
+  }
+
+  async start({ concurrency = 1, retries = 1 }){
+    if(!this._isSetup){
+      throw new Error('setup upload before starting');
+    }
+
     if(typeof this.filepath === 'undefined'){
       throw new Error('filepath is required to start the upload');
     }
@@ -59,27 +79,95 @@ module.exports = class UploadClient {
 
     let start = 0;
     let end = totalfilesize > chunkpartsize ? chunkpartsize: totalfilesize;
+    let formsToSend = [];
     for(let i = 0; i<totalfileparts; i++){
-      const chunk = fs.createReadStream(this.filepath, { start, end: end-1 });
+      const chunk = fs.createReadStream(this.filepath, { start, end: end - 1 });
       const formData = {
         qqfile: chunk,
         qqpartindex: i,
         qqtotalparts: totalfileparts,
         qqtotalfilesize: totalfilesize
       };
-      const uploadResponse = await this.request({
-        uri: '',
-        formData: formData,
-        method: 'POST'
-      });
-      if( !uploadResponse
-          || !uploadResponse.success ){
-        throw new Error('invalid response from upload server, aborting upload');
-      }
-      i++;
-      start=end;
-      end+=chunkpartsize;
+      formsToSend.push(formData);
+      start = end;
+      end = end+chunkpartsize > totalfilesize ? totalfilesize: end + chunkpartsize;
     }
+
+    await async.mapLimit(formsToSend, concurrency, async (formData) => {
+      let chunkProgress = {
+        status: 'uploading',
+        chunk_index: formData.qqpartindex,
+        total_indexes: formData.qqtotalparts - 1,
+        total_size: formData.qqtotalfilesize
+      };
+      this.emitProgress(chunkProgress);
+      let retriesLeft = retries;
+      let uploadResponse;
+
+      let uploaded = false;
+      try{
+        uploadResponse = await this.request({
+          uri: '',
+          formData: formData,
+          method: 'POST'
+        });
+        if( !uploadResponse
+            || !uploadResponse.success ){
+          chunkProgress.status = 'error-during-retry';
+          chunkProgress.error = new Error('invalid response from upload server, aborting upload');
+          this.emitProgress(chunkProgress);
+          throw chunkProgress.error;
+        }else{
+          uploaded = true;
+        }
+      }catch(err){
+        chunkProgress.status = 'error-retrying';
+        chunkProgress.error = err;
+        this.emitProgress(chunkProgress);
+      }
+      while(!uploaded && retriesLeft--){
+        try{
+          chunkProgress.status = 'retrying-chunk';
+          delete chunkProgress.error;
+          uploadResponse = await this.request({
+            uri: '',
+            formData: formData,
+            method: 'POST'
+          });
+          if( !uploadResponse
+              || !uploadResponse.success ){
+            chunkProgress.status = 'error-during-retry';
+            chunkProgress.error = new Error('invalid response from upload server, aborting upload');
+            this.emitProgress(chunkProgress);
+            throw chunkProgress.error;
+          }else{
+            uploaded = true;
+          }
+        }catch(err){
+          chunkProgress.status = 'error-retrying';
+          chunkProgress.error = err;
+          this.emitProgress(chunkProgress);
+        }
+      }
+      chunkProgress.status = 'uploaded';
+      delete chunkProgress.error;
+      this.emitProgress(chunkProgress);
+    });
+
     return (await this.complete()).video;
+  }
+
+  onProgress(callback) {
+    this.progressListeners.push(callback);
+  }
+
+  emitProgress(progress) {
+    this.progressListeners.forEach(callback => callback(progress));
+  }
+
+  emitProgressCompleted() {
+    while(this.progressListeners.length > 0){
+      (this.progressListeners.shift())({ status: 'completed', response });
+    }
   }
 }
