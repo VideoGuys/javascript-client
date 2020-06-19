@@ -113,10 +113,10 @@ module.exports = class UploadClient {
         });
         if( !uploadResponse
             || !uploadResponse.success ){
-          chunkProgress.status = 'error-during-retry';
+          chunkProgress.status = 'error-uploading';
           chunkProgress.error = new Error('invalid response from upload server, aborting upload');
           this.emitProgress(chunkProgress);
-          throw chunkProgress.error;
+          if(!retriesLeft) throw chunkProgress.error;
         }else{
           uploaded = true;
         }
@@ -124,8 +124,9 @@ module.exports = class UploadClient {
         chunkProgress.status = 'error-retrying';
         chunkProgress.error = err;
         this.emitProgress(chunkProgress);
+        if(!retriesLeft) throw chunkProgress.error;
       }
-      while(!uploaded && retriesLeft--){
+      while(!uploaded && --retriesLeft >= 0){
         try{
           chunkProgress.status = 'retrying-chunk';
           delete chunkProgress.error;
@@ -139,7 +140,7 @@ module.exports = class UploadClient {
             chunkProgress.status = 'error-during-retry';
             chunkProgress.error = new Error('invalid response from upload server, aborting upload');
             this.emitProgress(chunkProgress);
-            throw chunkProgress.error;
+            if(!retriesLeft) throw chunkProgress.error;
           }else{
             uploaded = true;
           }
@@ -147,6 +148,7 @@ module.exports = class UploadClient {
           chunkProgress.status = 'error-retrying';
           chunkProgress.error = err;
           this.emitProgress(chunkProgress);
+          if(!retriesLeft) throw chunkProgress.error;
         }
       }
       chunkProgress.status = 'uploaded';
